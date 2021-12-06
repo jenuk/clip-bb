@@ -1,0 +1,9 @@
+dataset:
+    target: datasets.SlideDataset
+    params:
+        dataset:
+            # config for your dataset here
+            target: <your ds here>
+            paramas: {}
+        stride: 8
+csv_name: example.csv
