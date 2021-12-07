@@ -17,7 +17,7 @@ ImageFile.LOAD_TRUNCATED_IMAGES = True
 class BaseDataset(Dataset):
     def __init__(self, dataset, interpolation="bicubic"):
         self.dataset = config2object.instantiate_from_config(dataset)
-        self.extra_keys = dataset.extra_keys
+        self.extra_keys = self.dataset.extra_keys
 
         # hardcode clip transformation
         self.size = 224 # size used by clip
@@ -36,17 +36,20 @@ class BaseDataset(Dataset):
                               "lanczos": PIL.Image.LANCZOS,
                               }[interpolation]
 
+
     def size_to_splits(self, size):
         raise NotImplemented("Inherit from this class and overwrite this method")
 
+
     def __len__(self):
         return len(self.dataset)
+
 
     def __getitem__(self, i):
         image, caption, extra = self.dataset[i]
 
         # clip tokens
-        tokens = clip.tokenize(batch["caption"], truncate=True)
+        tokens = clip.tokenize(caption, truncate=True)
 
         # preprocess images
         if not image.mode == "RGB":
@@ -64,7 +67,7 @@ class BaseDataset(Dataset):
         for x, y in starts:
             cropped = image.crop((x, y, x+self.size, y+self.size))
             slides.append(self.clip_transform(cropped))
-        slides = torch.stack(slides_clip)
+        slides = torch.stack(slides)
 
         factor = min(size)/self.size # go back from resized coordinates to original
         starts = (torch.tensor(starts)*factor).int()
@@ -75,7 +78,7 @@ class BaseDataset(Dataset):
 
 class SlideDataset(BaseDataset):
     def __init__(self, stride=8, max_ratio=2, **kwargs):
-        super(BaseDataset, self).__init__(**kwargs)
+        super(SlideDataset, self).__init__(**kwargs)
         self.stride = stride
         self.max_ratio = max_ratio
 
@@ -85,12 +88,12 @@ class SlideDataset(BaseDataset):
             offset = max(size[0]//2 - (self.max_ratio-1)*self.size, 0)
             end = min(size[0] - self.size, size[0]//2 + (self.max_ratio-1)*self.size)
 
-            starts = [[delta, 0] for delta in range(offset, end, self.slide_step_size)]
+            starts = [[delta, 0] for delta in range(offset, end, self.stride)]
         elif size[1] > self.size:
             offset = max(size[1]//2 - (self.max_ratio-1)*self.size, 0)
             end = min(size[1] - self.size, size[1]//2 + (self.max_ratio-1)*self.size)
 
-            starts = [[0, delta] for delta in range(offset, end, self.slide_step_size)]
+            starts = [[0, delta] for delta in range(offset, end, self.stride)]
         else:
             starts = [[0, 0]]
 
@@ -100,7 +103,7 @@ class SlideDataset(BaseDataset):
 
 class CenterDataset(BaseDataset):
     def __init__(self, max_ratio=2, **kwargs):
-        super(BaseDataset, self).__init__(**kwargs)
+        super(CenterDataset, self).__init__(**kwargs)
         self.max_ratio = max_ratio
 
 

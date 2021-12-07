@@ -17,7 +17,7 @@ def clip_bb(model_clip, dataloader, out_data, device):
         B, max_slides, _, _, _ = slides.shape
 
         slides = torch.flatten(slides, 0, 1).to(device)
-        img_emb = model_clip.encode_image(slides).reshape((B, num_imgs, -1))
+        img_emb = model_clip.encode_image(slides).reshape((B, max_slides, -1))
         # expect shape (B, max_slides, m)
 
         tokens = tokens.to(device)
@@ -37,7 +37,7 @@ def clip_bb(model_clip, dataloader, out_data, device):
         vals, best = vals.cpu(), best.cpu()
         # shape (B,)
 
-        start = torch.tensor([starts[k][best[k]] for k in range(B)])
+        start = torch.stack([starts[k][best[k]] for k in range(B)])
         out_data["start_x"].extend(start[:, 0].tolist())
         out_data["start_y"].extend(start[:, 1].tolist())
         out_data["similarity"].extend(vals.tolist())
@@ -47,12 +47,14 @@ def clip_bb(model_clip, dataloader, out_data, device):
     return out_data
 
 
-def collate_fn(slides, starts, tokens, extra):
-    # aggregate images with different number of slides by adding zero-slides
+def collate_fn(data):
+    #unpack data
+    slides, starts, tokens, extra = [[data[i][j] for i in range(len(data))] for j in range(4)]
     
     extra = {key: [entry[key] for entry in extra] for key in extra[0]}
 
-    num_slides = torch.tensor([t.shape[0] for t in res["slides_clip"]], dtype=torch.long)
+    # aggregate images with different number of slides by adding zero-slides
+    num_slides = torch.tensor([t.shape[0] for t in slides], dtype=torch.long)
     max_slides = torch.max(num_slides)
     B = num_slides.shape[0]
     img_shape = slides[0].shape[1:] # should always be (3, 224, 224)
@@ -61,8 +63,7 @@ def collate_fn(slides, starts, tokens, extra):
     for k, imgs in enumerate(slides):
         slides_uniform[k, :num_slides[k]] = imgs
 
-    tokens = torch.stack(tokens)
-    starts = torch.stack(starts)
+    tokens = torch.cat(tokens)
 
     return slides_uniform, num_slides, starts, tokens, extra
 
@@ -74,12 +75,6 @@ def parse_arguments():
         help="which gpu to use (-1 for none)",
         type=int,
         default=-1,
-    )
-    parser.add_argument(
-        "--stride",
-        type=int,
-        default=8,
-        help="Number of pixels window is moved with each step",
     )
     parser.add_argument(
         "--batch_size",
@@ -120,18 +115,13 @@ if __name__ == '__main__':
     print("Load CLIP")
     model_clip, _ = clip.load(opt.clip_model, device=device)
 
-    # create dataset
-    print("Load dataset")
-    datasets = []
+    os.makedirs("out", exist_ok=True)
     for config_fn in opt.configs:
         config = OmegaConf.load(config_fn)
+        print(OmegaConf.to_yaml(config))
         dataset = config2object.instantiate_from_config(config["dataset"])
-        datasets.append((dataset, config))
 
-
-    print("Evaluate best clipping")
-    for dataset, config in datasets:
-        df = {key: [] for key in dataset.extra_keys}
+        df = {key: [] for key in dataset.extra_keys | {"start_x", "start_y", "similarity"}}
 
         dataloader = torch.utils.data.DataLoader(
                 dataset,
@@ -139,7 +129,8 @@ if __name__ == '__main__':
                 num_workers=opt.num_workers,
                 collate_fn=collate_fn,
         )
-        clip_bb(model_clip, dataloader, csv, device)
+        clip_bb(model_clip, dataloader, df, device)
 
         df = pd.DataFrame(df)
-        df.to_csv(os.path.join("out", config["csv_name"]))
+        df = df.reindex(sorted(df.columns), axis=1)
+        df.to_csv(os.path.join("out", config["csv_name"]), index=False)

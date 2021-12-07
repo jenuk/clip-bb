@@ -3,7 +3,9 @@ dataset:
     params:
         dataset:
             # config for your dataset here
-            target: <your ds here>
-            paramas: {}
+            target: basic_example.BasicDataset
+            params: 
+                csv_file:  ~/taming-transformers/data/cc_validation.csv
+                data_root: ~/taming-transformers/data/
         stride: 8
 csv_name: example.csv
